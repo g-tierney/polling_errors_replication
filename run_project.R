@@ -11,6 +11,9 @@
 #' 
 ########################################################################
 
+# ensure all output directories exist
+if(!file.exists("stan_results")) dir.create("stan_results")
+if(!file.exists("temp")) dir.create("temp")
 
 source("scripts/01_model_prepare_input.R")
 if(FALSE){
