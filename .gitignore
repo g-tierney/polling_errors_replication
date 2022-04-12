@@ -2,9 +2,6 @@
 .Rhistory
 .Rapp.history
 
-# Session Data files
-.RData
-
 # Example code in package build process
 *-Ex.R
 
@@ -34,3 +31,12 @@ vignettes/*.pdf
 
 # Shiny token, see https://shiny.rstudio.com/articles/shinyapps.html
 rsconnect/
+
+.DS_Store
+
+# Results 
+# Session Data files
+temp/*
+*.rds
+*.Rdata
+output/results*
