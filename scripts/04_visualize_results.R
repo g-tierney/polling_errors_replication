@@ -338,7 +338,7 @@ layout <- '
 AABBCC
 #DDEE#
 '
-patch + plot_layout(design = layout,widths = rep(1,5),guides = 'collect')
+patch + patchwork::plot_layout(design = layout,widths = rep(1,5),guides = 'collect')
 ggsave("output/figures/06_error_ranges.png",width = 10,height = 5)
 
 election_bias_summaries %>%
