@@ -40,3 +40,4 @@ temp/*
 *.rds
 *.Rdata
 output/results*
+*archive/
