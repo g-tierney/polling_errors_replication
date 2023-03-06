@@ -36,8 +36,12 @@ preprocess_polls_f <- function(input_polls_data) {
 polls_main <- preprocess_polls_f( data.table( read.csv("data/polls_auxiliary_dataset_2020Update.csv") ) )
 
 
-# Write data for each election type into a separate RData file
-for (elec in c('Presidential')) {
+# Write data for each election type into a separate file
+for (elec in c('Presidential','Senatorial')) {
+  
+  if(elec == 'Presidential') polls_main <- preprocess_polls_f( data.table( read.csv("data/polls_auxiliary_dataset_2020Update.csv") ) )
+  if(elec == 'Senatorial') polls_main <- preprocess_polls_f( data.table( read.csv("data/polls_cnn_dataset.csv") ) )
+  
   election_polls <- polls_main[election_type == elec]
   
   # Generate correponding vector of r[i]'s for input to Stan model
@@ -62,11 +66,13 @@ for (elec in c('Presidential')) {
     election_identifiers = election_agg_info$election_identifier
   )
   
-  actual_polls_data$year <-  str_sub(actual_polls_data$election_identifiers,4,7) %>% as.factor() %>% as.integer()
+  actual_polls_data$year <-  stringr::str_sub(actual_polls_data$election_identifiers,4,7) |> as.factor() |> as.integer()
   actual_polls_data$N_year <- max(actual_polls_data$year)
-  actual_polls_data$state <- str_sub(actual_polls_data$election_identifiers,1,2) 
+  actual_polls_data$state <- stringr::str_sub(actual_polls_data$election_identifiers,1,2) 
   actual_polls_data$logit_v <- log(actual_polls_data$v/(1-actual_polls_data$v))
   
-  file_name <- sprintf("temp/stan_data_%s_auxiliary_2020Update.RData", tolower(elec))
+  if(elec == 'Presidential') file_name <- sprintf("temp/stan_data_%s_auxiliary_2020Update.RData", tolower(elec))
+  if(elec == 'Senatorial') file_name <- sprintf("temp/stan_data_%s_cnn_Polls.RData", tolower(elec))
+  
   save(actual_polls_data, file = file_name)
 }

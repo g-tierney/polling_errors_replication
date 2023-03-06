@@ -39,7 +39,7 @@ models <- c("rw_reparam_lpm","rw_reparam_logit","jasa_final_model","const_logit"
 
 # to run a specific iteration set these, then run the inner loop below
 model_name <- models[1]
-t <- 10
+t <- 50
 
 
 # ensure subfolders all exist

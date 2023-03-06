@@ -1,7 +1,5 @@
 
-elec <- 'Presidential'
-data_file <- sprintf("temp/stan_data_%s_auxiliary_2020Update.RData", tolower(elec))
-load(data_file)
+
 
 
 library(rstan)
@@ -44,15 +42,25 @@ if(Sys.getenv('SLURM_ARRAY_TASK_ID') != ""){
 
 # create matrix of parameter values
 models <- c("rw_reparam_lpm","rw_reparam_logit","jasa_final_model","const_logit","const_lpm")
-ts <- c(seq(5,100,5))
+ts <- c(seq(1,50,1),seq(55,100,5))
+elecs <- c("senatorial","presidential")
 
-param_matrix <- expand.grid(models=models,ts=ts) 
+param_matrix <- expand.grid(models=models,elecs=elecs,ts=ts) 
 nrow(param_matrix)
 
 # select this run's paramter values from the slurm_id
 model_name <- param_matrix$models[slurm_id]
 stan_model <- paste0("model_files/",model_name,".stan")
 t <- param_matrix$ts[slurm_id]
+elec <- param_matrix$elec[slurm_id]
+
+if(elec == "senatorial"){
+  data_file <- sprintf("temp/stan_data_%s_cnn_Polls.RData", tolower(elec))
+} else{
+  data_file <- sprintf("temp/stan_data_%s_auxiliary_2020Update.RData", tolower(elec))
+}
+
+load(data_file)
 
 print(paste0("Starting window t=",t,", model: ",model_name))
 
@@ -89,7 +97,12 @@ fit
 summary(fit)$summary[order(summary(fit)$summary[,"n_eff"]),c("n_eff","Rhat")][1:10,]
 
 #save
-result_name <- paste0("/work/gt83/polling_errors/stan_results/",model_name,"/",model_name,"_t",t,"_cluster.RData")
+if(elec == 'presidential'){
+  result_name <- paste0("/work/gt83/polling_errors/stan_results/",model_name,"/",model_name,"_t",t,"_results_pminmax.RData")
+} else {
+  result_name <- paste0("/work/gt83/polling_errors/stan_results/",model_name,"/",model_name,"_t",t,"_",elec,"_results_pminmax.RData")
+}
+
 print(result_name)
 save(fit,actual_polls_data_t, file = result_name)
 

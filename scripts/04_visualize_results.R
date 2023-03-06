@@ -11,12 +11,10 @@ results <- read_csv("output/frozen_results_bias.csv") %>%
 results_tau <- read_csv("output/frozen_results_tau.csv") %>% 
   mutate(year = as.character(year))
 
-load("temp/stan_data_presidential_auxiliary_2020Update.RData")
-
 list_to_df <- function(data){
   df <- tibble(r = data$r,
                election_identifiers = data$election_identifiers[data$r],
-               year = (2004 + (0:4)*4)[data$year[data$r]],
+               year = str_sub(data$election_identifiers,4,7)[data$r],
                state = data$state[data$r],
                y = data$y,
                n = data$n,
@@ -27,232 +25,24 @@ list_to_df <- function(data){
   df
 }
 
-polls_dataframe <- list_to_df(actual_polls_data)
+load("temp/stan_data_senatorial_cnn_Polls.RData")
+polls_dataframe_senate <- list_to_df(actual_polls_data)
+
+load("temp/stan_data_presidential_auxiliary_2020Update.RData")
+polls_dataframe_pres <- list_to_df(actual_polls_data)
+
+polls_dataframe <- bind_rows(polls_dataframe_senate,
+                             polls_dataframe_pres) %>% 
+  mutate(elec=case_when(str_detect(election_identifiers,"Senatorial") ~ "senatorial",
+                        str_detect(election_identifiers,"Presidential") ~ "presidential"))
 
 #names for different models
 model_crosswalk <- tibble(model = c("const_lpm","jasa_final_model","rw_reparam_lpm"),
                           Method = c("M1: Static","M2: Linear","M3: RW"),
                           IntroDescription = c("","Linear Model (Shirani-Mehr et al., 2018)","Proposed Random Walk Model"))
 
-
-# plot data availability
-polls_dataframe %>% 
-  group_by(year) %>% 
-  summarise(n=n(),
-            n_1week = sum(t<=7),
-            n_3week = sum(t<=21)) %>% 
-  pivot_longer(-year) %>% 
-  mutate(year = as.factor(year),
-         name = case_when(name == "n" ~ "100 Days",
-                   name == "n_1week" ~ "7 Days",
-                   name == "n_3week" ~ "21 Days")) %>% 
-  ggplot(aes(x=year,y=value,fill=name)) + 
-  geom_col(position = position_dodge2()) + 
-  labs(x= "Election Year",
-       y= "Number of Polls",
-       fill = "Days before Election") 
-ggsave("output/figures/02_npolls_by_year.png",width = 9,height = 7)
-
-library(geofacet)
-polls_dataframe %>% 
-  group_by(year,state) %>% 
-  summarise(n=n(),
-            n_1week = sum(t<=7),
-            n_3week = sum(t<=21)) %>% 
-  pivot_longer(-c(year,state)) %>% 
-  mutate(year = as.factor(year %>% str_replace("20","'")),
-         name = case_when(name == "n" ~ "100 Days",
-                          name == "n_1week" ~ "7 Days",
-                          name == "n_3week" ~ "21 Days")) %>% 
-  filter(name == "100 Days") %>% 
-  ggplot(aes(x=year,y=value)) + 
-  geom_col() + 
-  facet_geo(~ state) +
-  labs(x= "Election Year",
-       y= "Number of Polls",
-       fill = "Days before\nElection") + 
-  theme(axis.text = element_text(size = 12),
-        strip.text = element_text(size=10))
-ggsave("output/figures/03_npolls_by_year_state.png",width = 14,height = 7)
-
-
-### plot select states ###
-
-plot_state <- function(plot_state,plot_year=2008,results=dcc_results){
-  results %>% 
-    left_join(model_crosswalk) %>% 
-    filter(state==plot_state,year %in% plot_year) %>% 
-    filter(model %in% model_crosswalk$model) %>% 
-    filter(t %% 10 == 0) %>% 
-    ggplot(aes(x=t,y=mean,color = Method,fill=Method)) +
-    geom_line() + geom_point() + 
-    geom_ribbon(aes(ymin=q025,ymax=q975),alpha=.1) + 
-    geom_hline(yintercept = 0) + 
-    scale_y_continuous(labels = scales::percent) + 
-    xlim(0,100) + 
-    theme_bw() + 
-    theme(legend.position = "bottom") + 
-    labs(x="Using only polls at least T days before the election",
-         y="Election Day Error",
-         title=str_c(plot_state," ",plot_year," Polling Errors"))
-}
-
-plot_state_tau <- function(plot_state,plot_year=2008,results=results_tau){
-  results %>% 
-    left_join(model_crosswalk) %>% 
-    filter(state==plot_state,year %in% plot_year) %>% 
-    filter(model %in% model_crosswalk$model) %>% 
-    filter(t %% 10 == 0) %>% 
-    mutate(across(all_of(c("mean","q025","q975")),function(x) 2*x)) %>% 
-    ggplot(aes(x=t,y=mean,color = Method,fill=Method)) +
-    geom_line() + geom_point() + 
-    geom_ribbon(aes(ymin=q025,ymax=q975),alpha=.1) + 
-    geom_hline(yintercept = 0) + 
-    scale_y_continuous(labels = scales::percent) + 
-    xlim(0,100) + 
-    theme_bw() + 
-    theme(legend.position = "bottom") + 
-    labs(x="Using only polls at least T days before the election",
-         y="Excess MoE",
-         title=str_c(plot_state," ",plot_year," Excess Polling Margin of Error"))
-}
-
-plot_polls <- function(plot_state,plot_year=2008){
-  polls_dataframe %>% 
-    filter(state == plot_state,year == plot_year) %>% 
-    ggplot(aes(y=y,x=t)) + 
-    geom_point() + 
-    geom_hline(aes(yintercept = v),color="red") + 
-    scale_y_continuous(labels = scales::percent) + 
-    xlim(0,100) + 
-    theme_bw() + 
-    theme(legend.position = "bottom") + 
-    labs(x="Days until election",
-         y="Republican Two-Party Support",
-         title=str_c(plot_state," ",plot_year," Polls"))
-  
-}
-
-s1 <- "PA"; s2 <- "FL"
-y1 <- 2008; y2 <- 2016
-example_states <- gridExtra::grid.arrange(plot_state(s1,y1,results),
-                                          plot_state_tau(s1,y1),
-                                          plot_polls(s1,y1),
-                                          plot_state(s2,y2,results),
-                                          plot_state_tau(s2,y2),
-                                          plot_polls(s2,y2),layout_matrix = matrix(1:6,3,2,byrow = F))
-example_states
-ggsave("output/figures/04_example_elections.png",plot = example_states,width = 10,height = 8)
-
-t_linear <- 20
-t_rw <- 50
-bias_comparison <- results %>% 
-  filter((t == t_rw & model == "rw_reparam_lpm") | (t == t_linear & model == "jasa_final_model")) %>% 
-  filter(model %in% c("jasa_final_model","rw_reparam_lpm")) %>% 
-  mutate(model = if_else(str_detect(model,"rw"),"RW","Linear"),
-         year = as.character(year)) %>% 
-  pivot_wider(id_cols = c(state,year,election_identifiers),names_from = model,values_from = mean) %>% 
-  ggplot(aes(x=RW,y=Linear,color=year)) + 
-  geom_point() + 
-  geom_abline(slope=1,intercept = 0) + 
-  labs(x=str_c("M3: RW (T=",t_rw,")"),y=str_c("M2: Linear (T=",t_linear,")"),
-       color = "Election Year") +
-  coord_fixed(1) + 
-  theme_bw() + 
-  theme(legend.position = "bottom")
-bias_comparison
-
-t_linear <- 20
-t_rw <- 50
-tau_comparison <- results_tau %>% 
-  filter(t == t_rw & model == "rw_reparam_lpm" | t == t_linear & model == "jasa_final_model") %>% 
-  filter(model %in% c("jasa_final_model","rw_reparam_lpm")) %>% 
-  mutate(model = if_else(str_detect(model,"rw"),"RW","Linear"),
-         year = as.character(year),
-         mean=mean*2,
-         q025=q025*2,
-         q975=q975*2) %>% 
-  pivot_wider(id_cols = c(state,year,election_identifiers),names_from = model,values_from = mean) %>% 
-  ggplot(aes(x=RW,y=Linear,color=year)) + 
-  geom_point() + 
-  geom_abline(slope=1,intercept = 0) + 
-  labs(x=str_c("M3: RW (T=",t_rw,")"),y=str_c("M2: Linear (T=",t_linear,")"),
-       color = "Election Year") +
-  scale_y_continuous(labels = scales::percent) + 
-  scale_x_continuous(labels = scales::percent) + 
-  theme_bw() + 
-  theme(legend.position = "bottom")
-tau_comparison
-#ggsave("output/m2_m3_comparison_tau.png",height=8,width=10)
-
-
-bind_rows(
-  results_tau %>% 
-    filter(t == t_rw & model == "rw_reparam_lpm" | t == t_linear & model == "jasa_final_model") %>% 
-    filter(model %in% c("jasa_final_model","rw_reparam_lpm")) %>% 
-    mutate(model = if_else(str_detect(model,"rw"),"RW","Linear"),
-           year = as.character(year),
-           mean=mean*2,
-           q025=q025*2,
-           q975=q975*2) %>% 
-    pivot_wider(id_cols = c(state,year,election_identifiers),names_from = model,values_from = mean) %>% 
-    mutate(variable = "Excess Margin of Error"),
-  results %>% 
-    filter(t == t_rw & model == "rw_reparam_lpm" | t == t_linear & model == "jasa_final_model") %>% 
-    filter(model %in% c("jasa_final_model","rw_reparam_lpm")) %>% 
-    mutate(model = if_else(str_detect(model,"rw"),"RW","Linear"),
-           year = as.character(year)) %>% 
-    pivot_wider(id_cols = c(state,year,election_identifiers),names_from = model,values_from = mean) %>% 
-    mutate(variable = "Election Day Error")
-) %>% 
-  ggplot(aes(x=RW,y=Linear,color=year)) + 
-  geom_point() + 
-  geom_abline(slope=1,intercept = 0) + 
-  labs(x=str_c("M3: RW (T=",t_rw,")"),y=str_c("M2: Linear (T=",t_linear,")"),
-       color = "Election Year") +
-  scale_y_continuous(labels = scales::label_percent(accuracy = 0.01)) + 
-  scale_x_continuous(labels = scales::label_percent(accuracy = 0.01)) + 
-  facet_wrap(~variable,scales = "free")
-ggsave("output/figures/05_bias_tau_comp.png",width=10,height=5)    
-
-
-results %>% 
-  filter(t == 10) %>% 
-  filter(model %in% c("const_lpm","jasa_final_model","rw_reparam_lpm")) %>% 
-  group_by(year,model) %>% 
-  summarise(mean = mean(mean),
-            q025 = mean(q025),
-            q975 = mean(q975)) %>% 
-  ggplot(aes(x=year,y=mean,color=model,
-             ymin=q025,ymax=q975)) + 
-  geom_point(position = position_dodge(width = .5)) + 
-  #geom_errorbar(width = .2,position = position_dodge(width = .5)) + 
-  geom_hline(yintercept = 0) + 
-  theme_bw() + 
-  theme(legend.position = "bottom") +
-  labs(x = "Year",y="Average Election Day Error")
-
-
-t_rw <- 50
-t_linear <- 20
-results_tau %>% 
-  filter(t == t_rw & model == "rw_reparam_lpm" | t == t_linear & model == "jasa_final_model") %>% 
-  filter(model %in% c("const_lpm","jasa_final_model","rw_reparam_lpm")) %>% 
-  group_by(year,model) %>% 
-  summarise(mean = mean(mean)*2,
-            q025 = mean(q025)*2,
-            q975 = mean(q975)*2) %>% 
-  ggplot(aes(x=year,y=mean,color=model,
-             ymin=q025,ymax=q975)) + 
-  geom_point(position = position_dodge(width = .5)) + 
-  #geom_errorbar(width = .2,position = position_dodge(width = .5)) + 
-  geom_hline(yintercept = 0) + 
-  theme_bw() + 
-  theme(legend.position = "bottom") +
-  labs(x = "Year",y="Excess MoE") + 
-  scale_y_continuous(labels = scales::percent)
-
-
+################
+### Figure 1 ###
 
 ### plot states where things flip
 election_bias_summaries <- results %>% 
@@ -272,96 +62,6 @@ election_bias_summaries <- results %>%
             new = length(unique(sig_party_favored))>1,
             new30 = length(unique(sig_party_favored[t<=30]))>1) %>% 
   left_join(polls_dataframe %>% group_by(election_identifiers) %>% summarise(npolls=n()))
-
-election_bias_summaries_my <- election_bias_summaries %>% 
-  group_by(model,year) %>% 
-  filter(!str_detect(model,"const"),npolls>5) %>% 
-  summarise(nflips=sum(sign_flip),
-            nflips30 = sum(sign_flip_30),
-            avgflips=mean(sign_flip),
-            avgflips30=mean(sign_flip_30),
-            mean_range = mean(range),
-            dif_conclusions = sum(new),
-            dif_conclusions30 = sum(new30),
-            dif_conclusions_mean = mean(new)) 
-
-library(tidytext)
-election_bias_summaries %>% 
-  left_join(model_crosswalk) %>% 
-  filter(model %in% model_crosswalk$model[2:3],
-         #year %in% c(2008,2016),
-         npolls>20) %>% 
-  group_by(model,year) %>% 
-  arrange(min_bias) %>% 
-  mutate(year = str_c(year," Election Cycle"),
-         #state=factor(state,levels=unique(state))
-         state = reorder_within(state,min_bias,year)) %>% 
-  ggplot(aes(ymin=min_bias,ymax=max_bias,x=state,color=Method)) + 
-  geom_errorbar(width = .3,position = position_dodge2()) + 
-  facet_wrap(~ year,scales = "free_x") +
-  scale_x_reordered() + 
-  geom_hline(yintercept = 0) + 
-  scale_y_continuous(labels = scales::percent) + 
-  labs(x = "State",
-       y = "Ellection Day Error") + 
-  theme(text = element_text(size = 10),
-        axis.text = element_text(size = 5))
-
-plots <- lapply(sort(unique(election_bias_summaries$year)),function(y){
-  election_bias_summaries %>% 
-    left_join(model_crosswalk) %>% 
-    filter(model %in% model_crosswalk$model[2:3],
-           year %in% c(y),
-           npolls>20) %>% 
-    group_by(model,year) %>% 
-    arrange(min_bias) %>% 
-    mutate(year = str_c(year," Election Cycle"),
-           #state=factor(state,levels=unique(state))
-           state = reorder_within(state,min_bias,year)) %>% 
-    ggplot(aes(ymin=min_bias,ymax=max_bias,x=state,color=Method)) + 
-    geom_errorbar(width = .3,position = position_dodge2()) + 
-    facet_wrap(~ year,scales = "free_x") +
-    scale_x_reordered() + 
-    geom_hline(yintercept = 0) + 
-    scale_y_continuous(labels = scales::percent) + 
-    labs(x = "State",
-         y = "Ellection Day Error") + 
-    theme(text = element_text(size = 10),
-          axis.text = element_text(size = 5))
-})
-plots[[1]]  
-patch <- plots[[1]]
-for(p in 2:length(plots)){
-  patch <- patch + plots[[p]]
-}
-layout <- '
-AABBCC
-#DDEE#
-'
-patch + patchwork::plot_layout(design = layout,widths = rep(1,5),guides = 'collect')
-ggsave("output/figures/06_error_ranges.png",width = 10,height = 5)
-
-election_bias_summaries %>%
-  filter(model %in% model_crosswalk$model[2:3],
-         npolls>20) %>% 
-  group_by(year,state) %>% 
-  summarise(overlap = max(0,min(max_bias) - max(min_bias)),
-            overlap_pct_linear = overlap/range[model == "jasa_final_model"],
-            overlap_pct_rw = overlap/range[model == "rw_reparam_lpm"]) %>% 
-  group_by(year) %>% 
-  summarise(across(where(is.numeric),mean))
-
-
-plot_data <- results %>% 
-  filter(model %in% c("jasa_final_model","rw_reparam_lpm"),year == 2008,t %in% c(20,50,90)) %>% 
-  group_by(model,state) %>% 
-  mutate(party_favored = case_when(mean > 0 ~ "Republican Candidate",
-                                   mean < 0 ~ "Democratic Candidate"),
-         party_favored = factor(party_favored,levels = rev(unique(party_favored))),
-         t = str_c(t," Days before the Election")) %>% 
-  left_join(model_crosswalk) %>% 
-  right_join(urbnmapr::states %>% rename(state=state_abbv)) %>% 
-  filter(!state=="DC")
 
 flip_map_data <- election_bias_summaries %>% 
   group_by(model,state) %>% 
@@ -395,7 +95,274 @@ flip_map_data %>%
                     values = c("Purple","Red","Blue","Grey")) + 
   scale_alpha_manual(breaks = c("Inconsistent","Republican","Democratic","No Polls"),
                      values = c(1,0.7,0.7,0.7)) 
-  
+
 ggsave("output/figures/01_poll_flip_select_elections_map.png",width = 9,height = 8) 
 
 
+################
+### Figure 2 ###
+
+# plot data availability
+polls_dataframe %>% 
+  group_by(year,elec) %>% 
+  summarise(n=n(),
+            n_1week = sum(t<=7),
+            n_3week = sum(t<=21)) %>% 
+  pivot_longer(-c(year,elec)) %>% 
+  mutate(year = as.factor(year),
+         name = case_when(name == "n" ~ "100 Days",
+                          name == "n_1week" ~ "7 Days",
+                          name == "n_3week" ~ "21 Days"),
+         elec = str_to_title(elec)) %>% 
+  ggplot(aes(x=year,y=value,fill=name)) + 
+  geom_col(position = position_dodge2()) + 
+  facet_wrap(~elec,scales = "free_x") + 
+  labs(x= "Election Year",
+       y= "Number of Polls",
+       fill = "Days before Election") + 
+  theme(axis.text.x = element_text(hjust = 1,angle = 45))
+ggsave("output/figures/02_npolls_by_year.png",width = 9,height = 7)
+
+################
+### Figure 3 ###
+
+# above by state
+
+library(geofacet)
+polls_dataframe %>% 
+  filter(elec=="presidential") %>% 
+  group_by(year,state) %>% 
+  summarise(n=n(),
+            n_1week = sum(t<=7),
+            n_3week = sum(t<=21)) %>% 
+  pivot_longer(-c(year,state)) %>% 
+  mutate(year = as.factor(year %>% str_replace("20","'")),
+         name = case_when(name == "n" ~ "100 Days",
+                          name == "n_1week" ~ "7 Days",
+                          name == "n_3week" ~ "21 Days")) %>% 
+  filter(name == "100 Days") %>% 
+  ggplot(aes(x=year,y=value)) + 
+  geom_col() + 
+  facet_geo(~ state) +
+  labs(x= "Election Year",
+       y= "Number of Polls",
+       fill = "Days before\nElection") + 
+  theme(axis.text = element_text(size = 12),
+        strip.text = element_text(size=10))
+ggsave("output/figures/03_npolls_by_year_state.png",width = 14,height = 7)
+
+
+################
+### Figure 4 ###
+
+### plot select states ###
+
+plot_state_alpha <- function(plot_state,plot_year=2008,plot_elec="pres",
+                             results_alpha=results){
+  results_alpha %>% 
+    left_join(model_crosswalk) %>% 
+    filter(state==plot_state,year %in% plot_year,
+           str_detect(str_to_lower(election_identifiers),str_to_lower(plot_elec))) %>% 
+    filter(model %in% model_crosswalk$model) %>% 
+    #filter(t %% 10 == 0) %>% 
+    ggplot(aes(x=t,y=mean,color = Method,fill=Method)) +
+    geom_line() + geom_point() + 
+    geom_ribbon(aes(ymin=q025,ymax=q975),alpha=.1) + 
+    geom_hline(yintercept = 0) + 
+    scale_y_continuous(labels = scales::percent) + 
+    xlim(0,100) + 
+    theme_bw() + 
+    theme(legend.position = "bottom") + 
+    labs(x="Using only polls at least T days before the election",
+         y="Election Day Error",
+         title=str_c(plot_state," ",plot_year," ",plot_elec," Polling Errors"))
+}
+
+plot_state_tau <- function(plot_state,plot_year=2008,plot_elec="pres",
+                           results=results_tau){
+  results %>% 
+    left_join(model_crosswalk) %>% 
+    filter(state==plot_state,year %in% plot_year,
+           str_detect(str_to_lower(election_identifiers),str_to_lower(plot_elec))) %>% 
+    filter(model %in% model_crosswalk$model) %>% 
+    #filter(t %% 10 == 0) %>% 
+    mutate(across(all_of(c("mean","q025","q975")),function(x) 2*x)) %>% 
+    ggplot(aes(x=t,y=mean,color = Method,fill=Method)) +
+    geom_line() + geom_point() + 
+    geom_ribbon(aes(ymin=q025,ymax=q975),alpha=.1) + 
+    geom_hline(yintercept = 0) + 
+    scale_y_continuous(labels = scales::percent) + 
+    xlim(0,100) + 
+    theme_bw() + 
+    theme(legend.position = "bottom") + 
+    labs(x="Using only polls at least T days before the election",
+         y="Excess MoE",
+         title=str_c(plot_state," ",plot_year," Excess Polling Margin of Error"))
+}
+
+plot_polls <- function(plot_state,plot_year=2008,plot_elec="pres"){
+  polls_dataframe %>% 
+    filter(state == plot_state,year == plot_year,
+           str_detect(str_to_lower(election_identifiers),str_to_lower(plot_elec))) %>% 
+    ggplot(aes(y=y,x=t)) + 
+    geom_point() + 
+    geom_hline(aes(yintercept = v),color="red") + 
+    scale_y_continuous(labels = scales::percent) + 
+    xlim(0,100) + 
+    theme_bw() + 
+    theme(legend.position = "bottom") + 
+    labs(x="Days until election",
+         y="Republican Two-Party Support",
+         title=str_c(plot_state," ",plot_year," ", plot_elec," Polls"))
+  
+}
+
+s1 <- "PA"; s2 <- "FL"
+y1 <- 2008; y2 <- 2016
+e1 <- "Presidential"; e2 <- "Presidential"
+text_size <- 17
+example_states <- gridExtra::grid.arrange(plot_state_alpha(s1,y1,e1)+theme(text = element_text(size=text_size)),
+                                          plot_state_tau(s1,y1)+theme(text = element_text(size=text_size)),
+                                          plot_polls(s1,y1,e1)+theme(text = element_text(size=text_size)),
+                                          plot_state_alpha(s2,y2,e1)+theme(text = element_text(size=text_size)),
+                                          plot_state_tau(s2,y2)+theme(text = element_text(size=text_size)),
+                                          plot_polls(s2,y2,e2)+theme(text = element_text(size=text_size)),
+                                          layout_matrix = matrix(1:6,3,2,byrow = F))
+example_states
+ggsave("output/figures/04_example_elections.png",plot = example_states,width = 14,height = 15)
+
+################
+### Figure 5 ###
+
+t_linear <- 21
+t_rw <- 21
+
+bind_rows(
+  results_tau %>% 
+    filter(t == t_rw & model == "rw_reparam_lpm" | t == t_linear & model == "jasa_final_model") %>% 
+    filter(model %in% c("jasa_final_model","rw_reparam_lpm"),
+           elec != "Gubernatorial") %>% 
+    mutate(model = if_else(str_detect(model,"rw"),"RW","Linear"),
+           year = as.character(year),
+           mean=mean*2,
+           q025=q025*2,
+           q975=q975*2,
+           elec = str_to_title(elec)) %>% 
+    pivot_wider(id_cols = c(state,year,election_identifiers,elec),names_from = model,values_from = mean) %>% 
+    mutate(variable = "Excess Margin of Error"),
+  results %>% 
+    filter(t == t_rw & model == "rw_reparam_lpm" | t == t_linear & model == "jasa_final_model") %>% 
+    filter(model %in% c("jasa_final_model","rw_reparam_lpm"),
+           elec != "gubernatorial") %>% 
+    mutate(model = if_else(str_detect(model,"rw"),"RW","Linear"),
+           year = as.character(year),
+           elec=str_to_title(elec)) %>% 
+    pivot_wider(id_cols = c(state,year,election_identifiers,elec),names_from = model,values_from = mean) %>% 
+    mutate(variable = "Election Day Error")
+) %>% 
+  ggplot(aes(x=RW,y=Linear,color=year)) + 
+  geom_point() + 
+  geom_abline(slope=1,intercept = 0) + 
+  labs(x=str_c("M3: RW (T=",t_rw,")"),y=str_c("M2: Linear (T=",t_linear,")"),
+       color = "Election Year") +
+  #geom_smooth(method="lm",se=F) + 
+  scale_y_continuous(labels = scales::label_percent(accuracy = 0.01)) + 
+  scale_x_continuous(labels = scales::label_percent(accuracy = 0.01)) + 
+  facet_wrap(~variable+elec,scales = "free")
+ggsave("output/figures/05_bias_tau_comp.png",width=10,height=10)    
+
+################
+### Figure 6 ###
+
+error_range_comp <- results %>% 
+  filter(elec != "gubernatorial") %>% 
+  filter(model == "rw_reparam_lpm" |  model == "jasa_final_model") %>% 
+  filter(model %in% c("jasa_final_model","rw_reparam_lpm")) %>% 
+  filter(7<=t,t<=28) %>% 
+  mutate(model = if_else(str_detect(model,"rw"),"RW","Linear"),
+         year = as.character(year),
+         elec = str_to_title(elec)) %>% 
+  group_by(state,year,election_identifiers,model,elec) %>% summarise(sd = sd(mean),range=max(mean)-min(mean)) %>% 
+  pivot_wider(id_cols = c(state,year,election_identifiers,elec),names_from = model,values_from = range) 
+
+error_range_comp %>% 
+  ggplot(aes(x=RW,y=Linear,color=year)) + 
+  geom_point(alpha=0) + 
+  geom_text(aes(label=state),show.legend = F) + 
+  geom_abline(slope=1,intercept = 0) + 
+  geom_hline(yintercept = 0) + 
+  scale_x_continuous(labels = scales::label_percent()) +
+  scale_y_continuous(labels = scales::label_percent()) +
+  labs(x = "Range of RW Error Estimates",
+       y = "Range of Linear Error Estimates",
+  ) + 
+  facet_wrap(~elec,scales = "fixed") + 
+  guides(color = guide_legend("Year",override.aes = list(alpha=1)))
+
+ggsave("output/figures/06_error_range_comparison.png",width=10,height=7)
+
+###################
+### Regressions ###
+
+reg_data <- results %>% 
+  filter(model %in% c("jasa_final_model","rw_reparam_lpm")) %>% 
+  filter(14<=t,t<=28) %>% 
+  mutate(model = if_else(str_detect(model,"rw"),"RW","Linear"),
+         year = as.character(year)) %>% 
+  pivot_wider(id_cols = c(state,year,election_identifiers,t,elec),names_from = model,values_from = mean) %>% 
+  mutate(elec = factor(elec,levels = unique(elec)),
+         Linear = 100*Linear,
+         RW = 100*RW)
+
+reg_data_pres <- reg_data %>% filter(elec == "presidential")
+regs <- list(lm(Linear ~ RW,data=reg_data_pres),
+             lm(Linear ~ RW + state,data=reg_data_pres),
+             lm(Linear ~ RW + state + year,data=reg_data_pres),
+             lm(Linear ~ RW + state + year + factor(t),data=reg_data_pres))
+
+stargazer::stargazer(rev(regs),type = "text",
+                     star.cutoffs = c(0.05,0.01,0.001),
+                     omit = c("state","year","factor"),df = F,omit.labels = c("State","Year","Window"))
+stargazer::stargazer(rev(regs),type = "latex",
+                     df = F,star.cutoffs = c(0.05,0.01,0.001),
+                     omit = c("state","year","factor"),
+                     omit.labels = c("State","Election Year","Cutoff Time"),
+                     dep.var.caption = "",
+                     dep.var.labels = "Linear Error",
+                     covariate.labels = c("Random Walk Error",
+                                          "Constant"),out.header = F)
+
+reg_data_sen <- reg_data %>% filter(elec == "senatorial") %>% filter(as.numeric(year) %% 4 != 0)
+
+regs <- list(lm(Linear ~ RW,data=reg_data_sen),
+             lm(Linear ~ RW + state,data=reg_data_sen),
+             lm(Linear ~ RW + state + year,data=reg_data_sen),
+             lm(Linear ~ RW + state + year + factor(t),data=reg_data_sen))
+
+stargazer::stargazer(rev(regs),type = "text",
+                     omit = c("state","year","factor"),df = F,
+                     omit.labels = c("State","Year","Day"))
+stargazer::stargazer(rev(regs),type = "latex",
+                     df = F,star.cutoffs = c(0.05,0.01,0.001),
+                     omit = c("state","year","factor"),
+                     omit.labels = c("State","Election Year","Cutoff Time"),
+                     dep.var.caption = "",
+                     dep.var.labels = "Linear Error",
+                     covariate.labels = c("Random Walk Error",
+                                          "Constant"),out.header = F)
+
+regs <- list(lm(abs(Linear) ~ abs(RW) ,data=reg_data_sen),
+             lm(abs(Linear) ~ abs(RW) + state,data=reg_data_sen),
+             lm(abs(Linear) ~ abs(RW) + state + year,data=reg_data_sen),
+             lm(abs(Linear) ~ abs(RW) + state + year + factor(t),data=reg_data_sen))
+
+stargazer::stargazer(rev(regs),type = "text",
+                     omit = c("state","year","factor"),df = F,omit.labels = c("State","Year","Day"))
+stargazer::stargazer(rev(regs),type = "latex",
+                     df = F,star.cutoffs = c(0.05,0.01,0.001),
+                     omit = c("state","year","factor"),
+                     omit.labels = c("State","Election Year","Cutoff Time"),
+                     dep.var.caption = "",
+                     dep.var.labels = "Linear Error",
+                     covariate.labels = c("Random Walk Error",
+                                          "Constant"),out.header = F)
