@@ -98,9 +98,9 @@ summary(fit)$summary[order(summary(fit)$summary[,"n_eff"]),c("n_eff","Rhat")][1:
 
 #save
 if(elec == 'presidential'){
-  result_name <- paste0("/work/gt83/polling_errors/stan_results/",model_name,"/",model_name,"_t",t,"_results_pminmax.RData")
+  result_name <- paste0("stan_results/",model_name,"/",model_name,"_t",t,"_results_pminmax.RData")
 } else {
-  result_name <- paste0("/work/gt83/polling_errors/stan_results/",model_name,"/",model_name,"_t",t,"_",elec,"_results_pminmax.RData")
+  result_name <- paste0("stan_results/",model_name,"/",model_name,"_t",t,"_",elec,"_results_pminmax.RData")
 }
 
 print(result_name)
