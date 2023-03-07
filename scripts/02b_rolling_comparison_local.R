@@ -1,11 +1,10 @@
-library(tidyverse)
+
+
+
+
 library(rstan)
-rstan_options(auto_write = TRUE)
 options(mc.cores = parallel::detectCores())
-
-rm(list=ls())
-
-load("temp/stan_data_presidential_auxiliary_2020Update.RData")
+rstan_options(auto_write = FALSE)
 
 logit <- function(x) log(x/(1-x))
 
@@ -35,70 +34,71 @@ subset_leq_t <- function(t,data=actual_polls_data){
   data
 }
 
+# create matrix of parameter values
 models <- c("rw_reparam_lpm","rw_reparam_logit","jasa_final_model","const_logit","const_lpm")
+ts <- c(seq(1,50,1),seq(55,100,5))
+elecs <- c("senatorial","presidential")
 
-# to run a specific iteration set these, then run the inner loop below
-model_name <- models[1]
-t <- 50
+param_matrix <- expand.grid(models=models,elecs=elecs,ts=ts) 
+nrow(param_matrix)
 
-
-# ensure subfolders all exist
-if(!file.exists("stan_results")) dir.create("stan_results")
-for (m in models){
-  if(!file.exists(paste0("stan_results/",m))) dir.create(paste0("stan_results/",m))
-}
-
-# execute models
-for (model_name in models){
+#fix slurm_id to relevant value and run inner loop for a specific parameter configuration
+for (slurm_id in nrow(param_matrix)){
+  # select this run's paramter values from the slurm_id
+  model_name <- param_matrix$models[slurm_id]
+  stan_model <- paste0("model_files/",model_name,".stan")
+  t <- param_matrix$ts[slurm_id]
+  elec <- param_matrix$elec[slurm_id]
   
-  print(paste0("Model: ",model_name))
-  
-  for (t in seq(10,10,10)) {
-    #skip if you've already ran the result
-    result_name <- paste0("stan_results/",model_name,"/",model_name,"_t",t,"_local.RData")
-    if(file.exists(result_name)) next
-    
-    print("")
-    print(str_c("Starting window t=",t))
-    print("")
-    
-    # set sample frame
-    actual_polls_data_t <- subset_leq_t(t,actual_polls_data)
-    
-    actual_polls_data_t$logit_v <- logit(actual_polls_data_t$v)
-    # Fit the model to data
-    
-    # more iterations for smaller t
-    if(t <= 30 | model_name %in% c("const_logit","const_lpm")){
-      iter_bump <- 10000
-    } else{
-      iter_bump <- 0
-    }
-    
-    start <- Sys.time()
-    fit <- stan(file = paste0("model_files/",model_name,".stan"),
-                data = actual_polls_data_t, iter = 10000 + iter_bump,
-                chains = 8, cores = 8, seed = 1,
-                pars = c("raw_beta","raw_alpha","z","raw_z"),include = FALSE,
-                control = list(adapt_delta=0.99,max_treedepth=13)
-    )
-    print(sprintf("Warnings t=%s:",t))
-    print(warnings())
-    
-    end <- Sys.time()
-    print("")
-    print(paste0("t=",t," took ",difftime(end,start,units = "min") %>% round(2)," min"))
-    print("")
-    
-    #smallest ESS and Rhat
-    print(summary(fit)$summary[order(summary(fit)$summary[,"n_eff"]),][1:10,])
-    print(summary(fit)$summary[order(-summary(fit)$summary[,"Rhat"]),c("n_eff","Rhat")][1:10,])
-    
-    # Store the fit
-    save(actual_polls_data_t,fit,
-         file = result_name)
-    rm("fit","actual_polls_data_t")
-    gc(verbose = T)
+  if(elec == "senatorial"){
+    data_file <- sprintf("temp/stan_data_%s_cnn_Polls.RData", tolower(elec))
+  } else{
+    data_file <- sprintf("temp/stan_data_%s_auxiliary_2020Update.RData", tolower(elec))
   }
+  
+  load(data_file)
+  
+  print(paste0("Starting window t=",t,", model: ",model_name))
+  
+  # reset sample frame
+  actual_polls_data_t <- subset_leq_t(t)
+  actual_polls_data_t$logit_v <- logit(actual_polls_data_t$v)
+  
+  # more iterations for smaller t
+  if(t <= 30 | model_name %in% c("const_logit","const_lpm")){
+    iter_bump <- 10000
+  } else{
+    iter_bump <- 0
+  }
+  
+  
+  # Fit the model to data
+  start <- Sys.time()
+  fit <- stan(file = stan_model, 
+              data = actual_polls_data_t, iter = 10000 + iter_bump,
+              chains = 8, cores = 8, seed = 1,
+              pars = c("raw_beta","raw_alpha","z","raw_z"),include = FALSE,
+              control = list(adapt_delta=0.99,max_treedepth=13)
+  )
+  end <- Sys.time()
+  
+  print("")
+  print(paste0(" for ",model_name," t=",t," took ",round(difftime(end,start,units = "min"),2)," min."))
+  print(sprintf("Warnings=%s:",t))
+  print(warnings())
+  
+  fit
+  
+  #smallest ESS
+  summary(fit)$summary[order(summary(fit)$summary[,"n_eff"]),c("n_eff","Rhat")][1:10,]
+  
+  #save
+  if(elec == 'presidential'){
+    result_name <- paste0("stan_results/",model_name,"/",model_name,"_t",t,"_results_pminmax.RData")
+  } else {
+    result_name <- paste0("stan_results/",model_name,"/",model_name,"_t",t,"_",elec,"_results_pminmax.RData")
+  }
+  
+  print(result_name)
+  save(fit,actual_polls_data_t, file = result_name)
 }
-
